@@ -1,19 +1,40 @@
-# Discord Token Gen
+<p align="center">
+  <b style="font-size:2.5rem;">Discord Token Gen</b>
+</p>
+<p align="center">
+  <i>Browser automation, taught by actually building something.</i>
+</p>
 
-A no-nonsense, Playwright-powered bot that signs up Discord accounts for you — fresh temp email, real-looking Indian display name, details filled, emailed verified — then hands you the account. One command, then just press **Enter** to go again.
+<p align="center">
+  <a href="https://mail.cx"><img alt="Educational" src="https://img.shields.io/badge/Purpose-Educational-8A2BE2?labelColor=0a0a0a"></a>
+  <img alt="Node.js" src="https://img.shields.io/badge/Node.js-%3E%3D18-339933?logo=nodedotjs&logoColor=white&labelColor=0a0a0a">
+  <img alt="Playwright" src="https://img.shields.io/badge/Playwright-Firefox-2EAD33?logo=playwright&logoColor=white&labelColor=0a0a0a">
+  <img alt="Temp mail" src="https://img.shields.io/badge/Temp%20Mail-mail.cx-ff5722?labelColor=0a0a0a">
+  <img alt="License" src="https://img.shields.io/badge/License-MIT-yellow?labelColor=0a0a0a">
+</p>
 
-> **Straight talk:** this is for learning browser automation. Making accounts in bulk breaks Discord's Terms of Service and can get accounts (and your IP) banned. Use it to learn — not to spam.
+---
+
+> ## This project is educational.
+>
+> Its purpose is to teach how real browsers work under automation — scraping,
+> selectors, waiting, iframes, CLI loops — with a fun, working example. It is
+> **not** a tool for creating accounts in bulk, and it never should be: that
+> violates Discord's Terms of Service and gets accounts (and IPs) banned.
+> **Learn from it. Don't abuse it.**
 
 ---
 
 ## The short version
 
-1. It mints a throwaway email on **mail.cx**
-2. It opens Discord's signup page and fills everything: email, name, username, password, DOB
-3. It submits, waits for the verification email, opens it, and clicks **Verify Email** for you
-4. It prints the account — email / username / password / DOB — and asks if you want another
+`vishal.sh` is a Playwright bot that registers a Discord account end-to-end — and shows you exactly how it does it:
 
-And yes, it loops. Enter = next account. `x` + Enter = done.
+1. Mints a throwaway email on **mail.cx**
+2. Fills Discord's signup form: email, name, username, password, DOB
+3. Submits, waits for the verification email, opens it, clicks **Verify Email**
+4. Prints the account (email / username / password / DOB), then asks: another one?
+
+`Enter` = next account. `x` + `Enter` = done.
 
 ---
 
@@ -25,29 +46,34 @@ npx playwright install firefox
 ./vishal.sh
 ```
 
-You need **Node.js** and a **desktop OS** — the bot drives a real, visible browser window so you can step in if Discord throws a captcha.
+Requirements: **Node.js ≥ 18** and a desktop OS. The bot drives a real, visible browser window — that's the whole point of learning to automate.
 
 ---
 
-## How it actually works
+## The educational part (the good stuff)
 
-Here's the honest, less-boring explanation.
+This isn't a magic script. Every line below exists because real-world automation forces you to solve a real problem. Here are the ones worth stealing.
 
-### The browser is just another scriptable app
+### 1. The browser is a scriptable app
 
-Playwright launches a real Firefox and lets you do by hand-and-eye everything: type, click, wait, read pages. One "profile" (a `context`) shares cookies across tabs, so the mail tab and the Discord tab feel like one browser.
+Playwright starts a real Firefox and lets you type, click, wait, and read pages from code. A `context` is one browser *profile* — shared cookies and storage — which is why a mail.cx tab and a Discord tab can act like the same browser session.
 
-### The temp email has no API — so the DOM is the API
+```js
+const browser = await firefox.launch({ headless: false });
+const context = await browser.newContext();
+```
 
-mail.cx has no open inbox endpoint, so the bot reads the email address straight off the page and watches the inbox list for new mail. When there's no public API, scraping the rendered page is the legit fallback.
+### 2. When there's no API, the DOM is the API
+
+mail.cx has no public inbox endpoint. So the email address is read straight off the rendered page, and the inbox is watched by polling the DOM. Scraping is a legitimate technique exactly when no official interface exists.
 
 ```js
 const email = (await mailPage.locator('div.font-mono').first().innerText()).trim();
 ```
 
-### Why Discord's date picker is annoying (and how to beat it)
+### 3. Custom dropdowns break the easy tools
 
-Discord's Month/Day/Year are **not** real dropdowns. They're sneaky custom comboboxes, so standard select tools blow up on them. The trick: focus the box, type the first letters, hit Enter.
+Discord's Month / Day / Year fields are **not** `<select>` elements — they're hacked-together `role="combobox"` divs. Native select APIs fail against them. The reliable trick is keyboard *typeahead*: focus the box, type the value, press Enter.
 
 ```js
 const combo = page.locator(`[role="combobox"][aria-label="Month"]`);
@@ -56,9 +82,9 @@ await page.keyboard.type('January');
 await page.keyboard.press('Enter');
 ```
 
-### Things overlay and block clicks
+### 4. Overlayed elements intercept your clicks
 
-An hCaptcha iframe floats over the signup box, so normal clicks get intercepted. Bypass it by forcing the click or toggling the checkbox via JavaScript:
+An invisible hCaptcha iframe floats over the form and swallows pointer events. Two quiet workarounds: force the click, or flip the checkbox's state directly with `page.evaluate`.
 
 ```js
 await page.evaluate(() => {
@@ -67,9 +93,9 @@ await page.evaluate(() => {
 });
 ```
 
-### Wait for things to happen — don't guess
+### 5. Wait for state, never guess
 
-Sleeping is fragile. The bot polls until it sees a new mail row (up to 4 minutes), then moves:
+Blind `sleep()`s are how scripts grow flaky. The correct habit — polling until a condition is true:
 
 ```js
 await mailPage.waitForFunction(
@@ -79,15 +105,26 @@ await mailPage.waitForFunction(
 );
 ```
 
-Fun fact: these rows are clickable `<div>`s, **not** `<a>` links — a selector that assumed links would quietly find nothing. Check the real DOM before trusting your instincts.
+Debugging lesson baked in: these rows are clickable `<div>`s, **not** `<a>` links. A selector that assumed links found nothing, silently. Always inspect the real DOM before writing selectors.
 
-### The verify link hides inside an iframe
+### 6. The verify link hides inside an iframe
 
-The email body renders in an iframe. The bot steps into the frame and grabs the link **by its text** — `"Verify Email"` — not just "any link with discord", because the email footer is full of marketing links that look almost identical.
+The email body renders in an iframe. Playwright can step into each frame and target the link **by its text** — `"Verify Email"` — because the email footer is full of near-identical marketing links.
 
-### The terminal drives the loop
+```js
+for (const f of mailPage.frames()) {
+  const btn = f.locator('a').filter({ hasText: /verify email/i }).first();
+}
+```
 
-The browser stays open while the terminal asks "another one?" between runs — so the whole session stays in one browser, and you stay in control.
+### 7. The terminal drives the loop
+
+The browser stays open while the terminal paces the work — a shared session, and a human stays in control:
+
+```js
+const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+rl.question('> ', ans => { rl.close(); resolve(ans.trim()); });
+```
 
 ---
 
@@ -96,18 +133,17 @@ The browser stays open while the terminal asks "another one?" between runs — s
 ```
 discord/
 ├── vishal.sh      # the whole bot (bash wrapper + inline Node)
-├── package.json   # just needs Playwright
-└── CHANGELOG.md   # incremental dev log
+└── package.json   # just needs Playwright
 ```
 
-## Be real about the limits
+## Honest limitations
 
-- **Rate limiting is not a bug to fix.** Discord slows down signups from one IP — burst a few accounts quickly and verification emails stop coming for a while. Wait it out or switch IP. There's intentionally no proxy spamming here.
-- **Temp inboxes last 1 hour**, then vanish.
-- **Captchas happen.** The bot pauses and lets you solve them in the open window.
+- **Rate limiting is real, and that's the point.** Discord throttles signups from one IP — burst a few and verification emails dry up for a while. Waiting or switching IP is the only fix. There is deliberately no proxy spam built in.
+- **Temp inboxes die after 1 hour.**
+- **Captchas happen.** The bot pauses so you can solve them in the open window by hand.
 
 ---
 
 ## License
 
-MIT. Learn something. Be cool.
+MIT. Build something, learn from it, and keep it pleasant.
